@@ -1,0 +1,168 @@
+#include <IRremote.h>
+#include <Servo.h>
+
+const int irPin = 7;
+const int trigPin = 9;
+const int echoPin = 10;
+const int ledPin = 13;
+const int buzzerPin = 12;
+const int laserPin = 6;
+
+IRrecv irrecv(irPin);
+decode_results results;
+
+Servo servo1;
+Servo servo2;
+
+bool alarmArmed = false;
+bool alarmTriggered = false;
+long lastTriggeredTime = 0;
+unsigned long previousMillis = 0;
+const long interval = 500;
+
+int servo1Angle = 90;
+int servo2Angle = 90;
+int servo1Pos = 90;
+int servo2Pos = 90;
+
+bool ledState = false;
+void toggleLED() {
+    ledState = !ledState; // Invert the current state
+    digitalWrite(ledPin, ledState); // Set the LED to the new state
+}
+
+void setup() {
+  Serial.begin(9600);
+  irrecv.enableIRIn();
+  pinMode(ledPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(laserPin, OUTPUT);
+  digitalWrite(laserPin, LOW);
+
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  servo2.attach(4);
+  servo1.attach(5);
+  
+  servo1.write(servo1Angle);
+  servo2.write(servo2Angle);
+}
+
+void loop() 
+{
+  if (irrecv.decode(&results)) {
+    long int decCode = results.value;
+    Serial.println(decCode);
+
+    switch (decCode) {
+      case 16753245: //arm
+        alarmArmed = true;
+        alarmTriggered = false;
+        Serial.print("Alarm Armed: ");
+        Serial.println(alarmArmed ? "Yes" : "No");
+        digitalWrite(ledPin, HIGH);
+        servo1.write(servo1Angle);
+        servo2.write(servo2Angle);
+        break;
+
+      case 16769565: //disarm
+        alarmArmed = false;
+        alarmTriggered = false;
+        Serial.print("Alarm Armed: ");
+        Serial.println(alarmArmed ? "Yes" : "No");
+        digitalWrite(ledPin, LOW);
+        digitalWrite(buzzerPin, LOW);
+        digitalWrite(laserPin, LOW);
+        servo1.write(servo1Angle);
+        servo2.write(servo2Angle);
+        break;
+
+      case 16732845:
+        digitalWrite(laserPin, HIGH);
+        break;
+
+      case 16728765:
+        digitalWrite(laserPin, LOW);
+        break;
+
+      case 16743045:
+        digitalWrite(buzzerPin, HIGH);
+        break;
+
+      case 16724175:
+        digitalWrite(buzzerPin, LOW);
+        break;
+    }
+
+    irrecv.resume();
+  }
+  
+  if (Serial.available()) {
+    String data = Serial.readStringUntil('\n');
+    int laserX = data.toInt();
+    int laserY = data.substring(data.indexOf(' ') + 1).toInt();
+
+    Serial.print("Laser X: ");
+    Serial.print(laserX);
+    Serial.print(", Laser Y: ");
+    Serial.println(laserY);
+
+    if (laserX >= 0 && laserX <= 640 && laserY >= 0 && laserY <= 480) 
+    {
+      servo1Pos = map(laserX, 0, 640, 45, 135);
+      servo2Pos = map(laserY, 0, 480, 45, 135);
+    }
+    servo1Pos = constrain(servo1Pos, 0, 180);
+    servo2Pos = constrain(servo2Pos, 0, 180);
+
+    //servo1.write(servo1Pos);
+    //servo2.write(servo2Pos);
+  }
+
+  if (alarmArmed) 
+  {
+    digitalWrite(ledPin, HIGH);
+
+    long duration, distance;
+    digitalWrite(trigPin, LOW);  
+    digitalWrite(trigPin, HIGH); 
+    digitalWrite(trigPin, LOW);
+
+    duration = pulseIn(echoPin, HIGH);
+    distance = duration * 0.0344 / 2;  
+
+    Serial.print("Distance: ");
+    Serial.println(distance);
+
+    if (distance < 500 && distance > 0) 
+    {
+      if (!alarmTriggered) 
+      {
+        alarmTriggered = true;
+        alarmArmed = false;
+        digitalWrite(buzzerPin, HIGH);
+        digitalWrite(laserPin, HIGH);
+      }
+    } 
+  } 
+  else if (alarmTriggered)
+  {
+    //toggleLED();
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis >= interval) 
+    {
+        previousMillis = currentMillis;
+        digitalWrite(ledPin, !digitalRead(ledPin));
+    }
+
+    servo1.write(servo1Pos);
+    servo2.write(servo2Pos);
+  }
+  else //not armed or triggered
+  {
+    digitalWrite(ledPin, LOW);
+    digitalWrite(buzzerPin, LOW);
+    digitalWrite(laserPin, LOW);
+  }
+}
